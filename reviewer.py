@@ -3,19 +3,21 @@ import sys
 import argparse
 from dotenv import load_dotenv
 
-from langchain.llms import OpenAI
-from langchain.chains import RetrievalQA
+from langchain import PromptTemplate
 from langchain.vectorstores import FAISS
+from langchain.chat_models import ChatOpenAI
+from langchain.docstore.document import Document
 from langchain.document_loaders import PyPDFLoader
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
+from langchain.chains.summarize import load_summarize_chain
 
 
 if __name__ == "__main__":
     # Parse command-line arguments (e.g. python reviewer.py -p )
     parser = argparse.ArgumentParser(description="AI assistant for conducting literature reviews")
     parser.add_argument("-p", "--project", metavar="project", type=str, required=True, help="project title")
-    parser.add_argument("-r", "--revise", action='store_true', help="revise existing reviews")
+    parser.add_argument("-r", "--revise", action='store_true', help="revise all reviews")
     args = parser.parse_args()
     load_dotenv()
 
@@ -51,31 +53,38 @@ if __name__ == "__main__":
         vectorstore = FAISS.from_documents(docs, embeddings)
         vectorstore.save_local(os.path.join(indexes_path, paper))
 
-    # Create reviews for 
+    # Write reviews only for new papers, unless asked to revise all
     if not args.revise:
         papers = [paper for paper in papers if paper if paper not in os.listdir(reviews_path)]
 
-    for paper in papers[0:1]:
-        vectorstore = FAISS.load_local(os.path.join(indexes_path, paper), embeddings)
-        qa = RetrievalQA.from_chain_type(llm=OpenAI(), chain_type="stuff", retriever=vectorstore.as_retriever())
-        prompt = f"""
-        Summarize the {paper} paper in no more than 5 sentences.
-        Then, on a new line, provide a numbered list of 5 key points and ideas of the paper, each seperated by a new line.
-        Then, on a new line, write 2 sentences discussing limitations of the paper.
-
-        For example:
-        The Transcend paper introduces a statistical framework for assessing decisions made by a classifier to identify concept drift. It translates the decision assessment problem to a constraint optimization problem which enables Transcend to be parametric with diverse operational goals. 
-
-        Key points and ideas include:
-        1) the proposal of both meaningful and sufficient abstract assessment metrics
-        2) the translation of the decision assessment problem to a constraint optimization problem
-        3) the bootstrapping of the framework with pre-specified parameters
-        4) the evaluation of algorithm performances within a conformal evaluator framework
-        5) the application of the framework to machine learning-based security research and deployments
+    for paper in papers:
+        print(f"Generating review for {paper}...")
+        # Load and pre-process paper content
+        loader = PyPDFLoader(file_path=os.path.join(papers_path, paper+".pdf"))
+        docs = loader.load()
+        text_splitter = CharacterTextSplitter(chunk_size=4000, chunk_overlap=30, separator="\n")
+        docs = text_splitter.split_documents(documents=docs)
+        docs = [Document(page_content=doc.page_content) for doc in docs]
         
-        One limitation of the paper is the limited number of datasets used for experimentation. It is also highly computationally expensive to run.
+        # Prepare prompts
+        map_template_string = """
+        Given the segment {text} of a paper, summarize all of the technical information found in this segment
         """
-        res = qa.run(prompt)
-        
+        reduce_template_string = """
+        Given the summaries {text} of an academic paper, I want you to create:
+        1. A technical summary of the paper in a few sentences
+        2. A list of key points and ideas
+        3. Any limitations and future work listed
+        """
+
+        map_template = PromptTemplate(input_variables=["text"], template=map_template_string)
+        reduce_template = PromptTemplate(input_variables=["text"], template=reduce_template_string)
+
+        llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo")
+        chain = load_summarize_chain(llm, chain_type="map_reduce", map_prompt=map_template, combine_prompt=reduce_template)
+        res = chain({"input_documents": docs}, return_only_outputs=True)
+
         with open(os.path.join(reviews_path, paper+".txt"), "w") as f:
-            f.write(res)
+            f.write(res["output_text"])
+        
+        print("Done.")
