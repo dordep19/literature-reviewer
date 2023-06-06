@@ -1,5 +1,4 @@
 import os
-import sys
 import argparse
 from dotenv import load_dotenv
 
@@ -21,14 +20,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
     load_dotenv()
 
-    # Initialize project storage
-    project_path = os.path.join("projects", args.project)    
-    if not os.path.exists(project_path):
-        os.mkdir(project_path)
-
+    # Verify and initialize project storage
+    project_path = os.path.join("projects", args.project)
     papers_path = os.path.join(project_path, "papers")
+
     if not os.path.exists(papers_path):
-        os.mkdir(papers_path)
+        print(f"No papers directory found under project - created {papers_path}")
+        os.makedirs(papers_path)
 
     indexes_path = os.path.join(project_path, "indexes")
     if not os.path.exists(indexes_path):
@@ -53,7 +51,7 @@ if __name__ == "__main__":
         vectorstore = FAISS.from_documents(docs, embeddings)
         vectorstore.save_local(os.path.join(indexes_path, paper))
 
-    # Write reviews only for new papers, unless asked to revise all
+    # Generate reviews only for new papers, unless asked to revise all
     if not args.revise:
         papers = [paper for paper in papers if paper if paper not in os.listdir(reviews_path)]
 
@@ -80,11 +78,13 @@ if __name__ == "__main__":
         map_template = PromptTemplate(input_variables=["text"], template=map_template_string)
         reduce_template = PromptTemplate(input_variables=["text"], template=reduce_template_string)
 
+        # Generate reviews
         llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo")
         chain = load_summarize_chain(llm, chain_type="map_reduce", map_prompt=map_template, combine_prompt=reduce_template)
         res = chain({"input_documents": docs}, return_only_outputs=True)
 
-        with open(os.path.join(reviews_path, paper+".txt"), "w") as f:
+        review_path = os.path.join(reviews_path, paper+".txt")
+        with open(review_path, "w") as f:
             f.write(res["output_text"])
-        
-        print("Done.")
+
+        print(f"Stored review in {review_path}")
