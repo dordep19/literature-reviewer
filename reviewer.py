@@ -60,7 +60,7 @@ if __name__ == "__main__":
 
     # Generate reviews only for new papers, unless asked to revise all
     if not args.revise:
-        papers = [paper for paper in papers if paper if paper not in os.listdir(reviews_path)]
+        papers = [paper for paper in papers if paper+".txt" not in os.listdir(reviews_path)]
 
     for paper in papers:
         print(f"Generating review for {paper}...")
