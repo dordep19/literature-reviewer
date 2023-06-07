@@ -2,10 +2,9 @@ import os
 import argparse
 from dotenv import load_dotenv
 
-from langchain import PromptTemplate
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
-from langchain.chat_models import ChatOpenAI
+from langchain import OpenAI, PromptTemplate
 from langchain.docstore.document import Document
 from langchain.document_loaders import PyPDFLoader
 from langchain.embeddings.openai import OpenAIEmbeddings
@@ -46,7 +45,7 @@ if __name__ == "__main__":
         exit(0)
 
     embeddings = OpenAIEmbeddings()
-    llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo")
+    llm = OpenAI(temperature=0)
 
     # Embed new papers into vector stores
     for paper in  new_papers:
@@ -71,7 +70,7 @@ if __name__ == "__main__":
         text_splitter = CharacterTextSplitter(chunk_size=4000, chunk_overlap=30, separator="\n")
         docs = text_splitter.split_documents(documents=docs)
         docs = [Document(page_content=doc.page_content) for doc in docs]
-        
+
         # Prepare prompts
         map_template_string = """
         Given the segment {text} of a paper, summarize all of the technical information found in this segment
@@ -85,7 +84,7 @@ if __name__ == "__main__":
 
         map_template = PromptTemplate(input_variables=["text"], template=map_template_string)
         reduce_template = PromptTemplate(input_variables=["text"], template=reduce_template_string)
-
+        
         # Generate reviews
         chain = load_summarize_chain(llm, chain_type="map_reduce", map_prompt=map_template, combine_prompt=reduce_template)
         res = chain({"input_documents": docs}, return_only_outputs=True)
